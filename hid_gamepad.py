@@ -1,5 +1,6 @@
 import hid
 import time
+import threading
 
 
 def list_gamepads():
@@ -20,11 +21,37 @@ class hid_gamepad():
         "Raised when the controller mapping is not provided"
         pass
 
+    class update_thread(threading.Thread):
+        """Thread used to continually run the updateState function on a Gamepad
+        in the background. One of these is created by the Gamepad start_asynchronous 
+        function and closed by stop_asynchronous"""
+
+        def __init__(self, gamepad):
+            threading.Thread.__init__(self)
+            if isinstance(gamepad, hid_gamepad):
+                self.gamepad = gamepad
+            else:
+                raise ValueError('Gamepad update thread was not created with a valid Gamepad object')
+            self.running = True
+            print("thread created")
+
+        def run(self):
+            try:
+                while self.running:
+                    # print("thread working")
+                    time.sleep(100/1000)
+                    self.gamepad.update_state()
+                self.gamepad = None
+            except:
+                self.running = False
+                self.gamepad = None
+                raise
+
+
     def __init__(self):
         self.__device_instance = None
         self.__MAX_BYTES = 128
-        self._vendor_id = -1
-        self._product_id = -1
+        self._device_info = {}
         self._is_connected = False
 
         self._raw_inputs = []
@@ -33,9 +60,11 @@ class hid_gamepad():
         self._axis_mapping = {}
         self._axis_sate = []
         self._update_thread = None
+        self._lock = threading.Lock()
 
     def __del__(self):
         self.disconnect()
+        self.stop_asynchronous()
 
     @property
     def is_connected(self):
@@ -43,12 +72,16 @@ class hid_gamepad():
 
     @property
     def vendor_id(self):
-        return self._vendor_id
+        return self._device_info['vendor_id']
 
     @property
     def product_id(self):
-        return self._product_id
+        return self._device_info['product_id']
 
+    @property
+    def device_info(self):
+        return self._device_info
+    
     @property
     def raw_inputs(self):
         """ Returnslist of bytes that represent the state of the controller."""
@@ -66,8 +99,7 @@ class hid_gamepad():
             self.__device_instance.open(target_device['vendor_id'], target_device['product_id'])
             self.__device_instance.set_nonblocking(True)
             if (self.__device_instance.error() == "Success"):
-                self._vendor_id = target_device['vendor_id']
-                self._product_id = target_device['product_id']
+                self._device_info = target_device
                 self._is_connected = True
                 print('Connection with the device e has been stablished')
                 return True
@@ -132,13 +164,17 @@ class hid_gamepad():
         state of the controller. Raw bits are storred in "raw_inputs" variable."""
 
         if self._is_connected is True:
+            self._lock.acquire()
             self._raw_inputs = self.read_raw_bits()
             if self._raw_inputs:
+                self._lock.release()
                 self.process_inputs()
                 return True
             else:
+                self._lock.release()
                 return False
         else:
+            self._lock.release()
             return False
 
     def process_inputs(self):
@@ -260,85 +296,22 @@ class hid_gamepad():
                 return True
         return False
 
+    def start_asynchronous(self):
+            """Starts a background thread which keeps the gamepad state updated automatically.
+            This allows for asynchronous gamepad updates and event callback code."""
 
-class esperanza_gamepad(hid_gamepad):
-    """"Class for Esperanza EG102 USB PC gamepad."""
+            if self._is_connected is True:
+                if self._update_thread is not None:
+                    if self._update_thread.running:
+                        raise RuntimeError('Called startBackgroundUpdates when the update thread is already running')
+                self._update_thread = hid_gamepad.update_thread(self)
+                self._update_thread.start()
 
-    def __init__(self):
-        super().__init__()
+    def stop_asynchronous(self):
+            """Stops the background thread which keeps the gamepad state updated automatically.
+            This may be called even if the background thread was never started.
 
-        # Axis and buttons mapping with indexes are prvided in class constructor
-
-        axis_mapping = {
-            'ax1_x': 0,
-            'ax1_y': 1,
-            'ax2_x': 2,
-            'ax2_y': 3,
-            'ax3_x': 4,
-            'ax3_y': 5
-        }
-        self.set_axis_mapping(axis_mapping)
-
-        button_mapping = {
-            'l_1': 0,
-            'l_2': 1,
-            'r_1': 2,
-            'r_2': 3,
-            'b_1': 4,
-            'b_2': 5,
-            'b_3': 6,
-            'b_4': 7,
-            'l_b': 8,
-            'r_b': 9,
-            'select': 10,
-            'start': 11,
-            'analog': 12
-        }
-        self.set_button_mapping(button_mapping)
-
-    def process_inputs(self):
-        """This function is specific to the selected controller. It is used to 
-        interpret the bit fields stored in the "raw_inputs" variable and
-        read the values of the defined axes and buttons of the controller.
-            
-        Each controller should have its own implementation of the "process_inputs"
-        function.
-        """
-        raw_inputs = self.raw_inputs
-        # getting the state of individual axes
-        self.set_axis_state('ax1_x', (raw_inputs[1] - 128) / 128)
-        self.set_axis_state('ax1_y', (raw_inputs[2] - 128) / 128)
-        self.set_axis_state('ax2_x', (raw_inputs[3] - 128) / 128)
-        self.set_axis_state('ax2_y', (raw_inputs[4] - 128) / 128)
-
-        if (raw_inputs[5] & 0b00001111) == 0b00001111:
-            self.set_axis_state('ax3_x', 0.0)
-            self.set_axis_state('ax3_y', 0.0)
-        elif (raw_inputs[5] & 0b00000110) == 0b00000110:
-            self.set_axis_state('ax3_x', -1.0)
-        elif (raw_inputs[5] & 0b00000010) == 0b00000010:
-            self.set_axis_state('ax3_x', 1.0)
-        elif (raw_inputs[5] & 0b00000000) == 0b00000000:
-            self.set_axis_state('ax3_y', -1.0)
-        elif (raw_inputs[5] & 0b00000100) == 0b00000100:
-            self.set_axis_state('ax3_y', 1.0)
-        else:
-            pass
-
-        # using the bitmasks to get the state of individual buttons
-        self.set_button_state('b_1', (raw_inputs[5] & 0b00010000) == 0b00010000)
-        self.set_button_state('b_2', (raw_inputs[5] & 0b00100000) == 0b00100000)
-        self.set_button_state('b_3', (raw_inputs[5] & 0b01000000) == 0b01000000)
-        self.set_button_state('b_4', (raw_inputs[5] & 0b10000000) == 0b10000000)
-
-        self.set_button_state('l_1', (raw_inputs[6] & 0b00000001) == 0b00000001)
-        self.set_button_state('l_2', (raw_inputs[6] & 0b00000100) == 0b00000100)
-        self.set_button_state('r_1', (raw_inputs[6] & 0b00000010) == 0b00000010)
-        self.set_button_state('r_2', (raw_inputs[6] & 0b00001000) == 0b00001000)
-
-        self.set_button_state('select', (raw_inputs[6] & 0b00010000) == 0b00010000)
-        self.set_button_state('start', (raw_inputs[6] & 0b00100000) == 0b00100000)
-        self.set_button_state('l_b', (raw_inputs[6] & 0b01000000) == 0b01000000)
-        self.set_button_state('r_b', (raw_inputs[6] & 0b10000000) == 0b10000000)
-
+            The thread will stop on the next event after this call was made."""
+            if self._update_thread is not None:
+                self._update_thread.running = False
 
