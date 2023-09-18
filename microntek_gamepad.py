@@ -34,6 +34,19 @@ class microntek_gamepad(hid_gamepad):
         }
         self.set_button_mapping(button_mapping)
 
+    def connect(self, target_device):
+        try:
+            if str(target_device['manufacturer_string']).strip().lower() == "microntek":
+                return super().connect(target_device)
+            else:
+                print("Device is not a Microntek gamepad.")
+                return False
+
+        except KeyError:
+            raise ValueError(f"Property 'manufacturer_string' was not found")
+            return False
+        
+
     def process_inputs(self):
         """This function is specific to the selected controller. It is used to 
         interpret the bit fields stored in the "raw_inputs" variable and
