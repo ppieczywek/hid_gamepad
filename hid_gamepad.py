@@ -38,7 +38,6 @@ class hid_gamepad():
         def run(self):
             try:
                 while self.running:
-                    # print("thread working")
                     time.sleep(100/1000)
                     self.gamepad.update_state()
                 self.gamepad = None
@@ -64,29 +63,52 @@ class hid_gamepad():
 
     def __del__(self):
         self.disconnect()
-        self.stop_asynchronous()
+
 
     @property
     def is_connected(self):
         return self._is_connected
-
-    @property
-    def vendor_id(self):
-        return self._device_info['vendor_id']
-
-    @property
-    def product_id(self):
-        return self._device_info['product_id']
-
-    @property
-    def device_info(self):
-        return self._device_info
     
+
+    def get_available_info(self):
+        """Returns all types device informations."""
+
+        if self._is_connected:
+            if self._device_info:
+                return self._device_info.keys()
+            else:
+                print('Device info not avialable')
+                return None
+        else:
+            print('Device info not avialable - gamepad is not connected')
+            return None
+        
+
+    def get_device_info(self, field):
+        """"Returns value for specified type of device information. Type of
+        device information is provided by 'field' varaible"""
+
+        try:
+            if self._is_connected:
+                if self._device_info:
+                    return self._device_info[field]
+                else:
+                    print('Device info not avialable')
+                    return None
+            else:
+                print('Device info not avialable - gamepad is not connected')
+                return None
+        except KeyError:
+            raise ValueError(f'Property {field} was not found')
+    
+
     @property
     def raw_inputs(self):
         """ Returnslist of bytes that represent the state of the controller."""
+
         return self._raw_inputs
     
+
     def connect(self, target_device):
         """Connects with device specified by "target_device" variable. The "target_device"
         is a dictionary containig "ventor_id" and "product_it" keys with assiciated values.
@@ -112,8 +134,10 @@ class hid_gamepad():
             print('Unable to connect with the selected device')
             return False
 
+
     def reconnect(self):
         """Reconnects previosly connected device."""
+
         try:
             self.__device_instance = hid.device()
             self.__device_instance.open(self._vendor_id, self._product_id)
@@ -130,6 +154,7 @@ class hid_gamepad():
             print('Unable to reconnect with the device')
             return False
 
+
     def disconnect(self):
         """Disconnects with the controller"""
 
@@ -137,12 +162,26 @@ class hid_gamepad():
             if self._is_connected is True:
                 if self.__device_instance is not None:
                     self.__device_instance.close()
+                    self.__device_instance = None
+                    self.__MAX_BYTES = 128
+                    self._device_info = {}
+                    self._is_connected = False
+
+                    self._raw_inputs = []
+                    self._button_mapping = {}
+                    self._button_sate = []
+                    self._axis_mapping = {}
+                    self._axis_sate = []
+                    self.stop_asynchronous()
+                    self._update_thread = None
+                    
                     print('Device disconnected')
                     return True
             return False
         except OSError:
             print('Unable to properly disconnect the device')
             return False
+
 
     def read_raw_bits(self):
         """Function reads the controller state as raw bits and returns
@@ -155,6 +194,7 @@ class hid_gamepad():
                 print("Device connection lost")
                 self._is_connected = False
                 return None
+
 
     def update_state(self):
         """Function reads the current state of the controller. Calling the
@@ -177,6 +217,7 @@ class hid_gamepad():
             self._lock.release()
             return False
 
+
     def process_inputs(self):
         """This function is specific to the selected controller. It is used to 
         interpret the bit fields stored in the "raw_inputs" variable and
@@ -186,6 +227,7 @@ class hid_gamepad():
         function. See example below.
         """
         pass
+
 
     def get_button_state(self, button_name):
         """Returns True if the button specified by name or index has been pressed
@@ -210,6 +252,7 @@ class hid_gamepad():
         except hid_gamepad.MappingException:
             print('Button mapping not provided')
 
+
     def set_button_state(self, button_name, state):
         """Returns True if the button specified by name or index has
         been successfully changed. Throws ValueError if the button 
@@ -232,6 +275,7 @@ class hid_gamepad():
         except hid_gamepad.MappingException:
             print('Button mapping not provided')
 
+
     def get_axis_state(self, axis_name):
         """Returns floating point value of the axis specified by name or index.
         Throws ValueError if the button name or index cannot be found."""
@@ -252,6 +296,7 @@ class hid_gamepad():
             raise ValueError('Axis name %s was not found' % axis_name)
         except hid_gamepad.MappingException:
             print('Axis mapping not provided')
+
 
     def set_axis_state(self, axis_name, state):
         """Returns True if the state of the axis specified by name or 
@@ -286,6 +331,7 @@ class hid_gamepad():
                 return True
         return False
 
+
     def set_button_mapping(self, mapping):
         """Sets the names for controller buttons. Mapping is provided as dictionary
         with button names as keys and axis indexes as values"""
@@ -295,6 +341,7 @@ class hid_gamepad():
                 self._button_state = [False for i in range(len(mapping))]
                 return True
         return False
+
 
     def start_asynchronous(self):
             """Starts a background thread which keeps the gamepad state updated automatically.
@@ -307,6 +354,7 @@ class hid_gamepad():
                 self._update_thread = hid_gamepad.update_thread(self)
                 self._update_thread.start()
 
+
     def stop_asynchronous(self):
             """Stops the background thread which keeps the gamepad state updated automatically.
             This may be called even if the background thread was never started.
@@ -315,3 +363,25 @@ class hid_gamepad():
             if self._update_thread is not None:
                 self._update_thread.running = False
 
+    def get_axis_names(self):
+        if self._is_connected:
+            if self._axis_mapping:
+                return self._axis_mapping.keys()
+            else:
+                print('Axis mapping not provided.')
+                return None
+        else:
+            print('Axis mapping not avialable - gamepad is not connected')
+            return None
+
+
+    def get_button_names(self):
+        if self._is_connected:
+            if self._button_mapping:
+                return self._button_mapping.keys()
+            else:
+                print('Button mapping not provided.')
+                return None
+        else:
+            print('Button mapping not avialable - gamepad is not connected')
+            return None
